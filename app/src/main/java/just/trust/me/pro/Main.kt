@@ -7,10 +7,12 @@ import android.webkit.WebView
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodReplacement
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import org.apache.http.impl.client.DefaultHttpClient
 import org.apache.http.params.HttpParams
+import java.lang.reflect.Modifier
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -18,6 +20,10 @@ import javax.net.ssl.HostnameVerifier
 
 class Main : IXposedHookLoadPackage {
     object SslBypassHooks {
+        private val searchedClasses = mutableMapOf<String, Boolean>()
+        private var certificatePinnerClass: Class<*>? = null
+        private var okHostnameVerifierClass: Class<*>? = null
+
         fun hookAll(lpparam: XC_LoadPackage.LoadPackageParam) {
             hookSSLContext(lpparam)
             hookTrustManagerImplVerifyChain(lpparam)
@@ -29,6 +35,9 @@ class Main : IXposedHookLoadPackage {
             hookPinningTrustManager(lpparam)
             hookX509TrustManagerExtensions(lpparam)
             hookNetworkSecurityTrustManager(lpparam)
+
+            // Auto detect and hook obfuscated OkHttp classes
+            findAndHookObfuscatedOkHttp(lpparam)
         }
 
         private fun hookSSLContext(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -302,6 +311,148 @@ class Main : IXposedHookLoadPackage {
                         }
                     }
                 )
+            }
+        }
+
+        // Find and hook obfuscated OkHttp classes
+        @SuppressLint("PrivateApi")
+        private fun findAndHookObfuscatedOkHttp(lpparam: XC_LoadPackage.LoadPackageParam) {
+            tryHook("OpenSSLSocketFactoryImpl.createSocket") {
+                val openSslClass =
+                    lpparam.classLoader.loadClass("com.android.org.conscrypt.OpenSSLSocketFactoryImpl")
+                XposedBridge.hookAllMethods(openSslClass, "createSocket", object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (certificatePinnerClass == null) {
+                            findOkHttpClasses(Throwable().stackTrace, lpparam.classLoader)
+                        }
+                    }
+                })
+            }
+        }
+
+        private fun findOkHttpClasses(
+            stackTrace: Array<StackTraceElement>,
+            classLoader: ClassLoader
+        ) {
+            // Find RealConnection class first
+            val realConnectionClass = findRealConnectionClass(stackTrace, classLoader) ?: return
+            LogUtils.debug("✓ Found RealConnection: ${realConnectionClass.name}")
+
+            // Find Route from RealConnection constructor
+            val routeClass = findRouteClass(realConnectionClass, classLoader) ?: return
+            LogUtils.debug("✓ Found Route: ${routeClass.name}")
+
+            // Find Address from Route constructor
+            val addressClass = findAddressClass(routeClass, classLoader) ?: return
+            LogUtils.debug("✓ Found Address: ${addressClass.name}")
+
+            // Hook Address constructor to get OkHostnameVerifier instance
+            hookAddressConstructor(addressClass)
+
+            // Get CertificatePinner from Address constructor parameters
+            certificatePinnerClass = addressClass.constructors.firstOrNull {
+                it.parameterTypes.size == 12
+            }?.parameterTypes?.get(6)?.also {
+                hookCertificatePinnerClass(it)
+            }
+        }
+
+        private fun findRealConnectionClass(
+            stackTrace: Array<StackTraceElement>,
+            classLoader: ClassLoader
+        ): Class<*>? {
+            return stackTrace.asSequence()
+                .map { it.className }
+                .filter { !searchedClasses.containsKey(it) }
+                .mapNotNull { className ->
+                    searchedClasses[className] = true
+                    try {
+                        val clazz = classLoader.loadClass(className)
+                        if (isRealConnectionClass(clazz)) clazz else null
+                    } catch (e: Exception) {
+                        null
+                    }
+                }.firstOrNull()
+        }
+
+        private fun isRealConnectionClass(clazz: Class<*>): Boolean {
+            if (clazz.superclass.name == "java.lang.Object") return false
+
+            var intCount = 0
+            var listCount = 0
+            var socketCount = 0
+            var booleanCount = 0
+            var longCount = 0
+
+            clazz.declaredFields.forEach { field ->
+                val isStatic = Modifier.isStatic(field.modifiers)
+                val isFinal = Modifier.isFinal(field.modifiers)
+
+                when (field.type.name) {
+                    "int" -> if (!isStatic && !isFinal) intCount++
+                    "java.util.List" -> if (!isStatic && isFinal) listCount++
+                    "java.net.Socket" -> if (!isStatic && !isFinal) socketCount++
+                    "boolean" -> if (!isStatic && !isFinal) booleanCount++
+                    "long" -> if (!isStatic && !isFinal) longCount++
+                }
+            }
+
+            return intCount == 4 && listCount == 1 && socketCount == 2 &&
+                    booleanCount == 1 && longCount == 1
+        }
+
+        private fun findRouteClass(
+            realConnectionClass: Class<*>,
+            classLoader: ClassLoader
+        ): Class<*>? {
+            return realConnectionClass.constructors.firstOrNull {
+                it.parameterTypes.size == 2
+            }?.parameterTypes?.get(1)
+        }
+
+        private fun findAddressClass(routeClass: Class<*>, classLoader: ClassLoader): Class<*>? {
+            return routeClass.constructors.firstOrNull {
+                it.parameterTypes.size == 3
+            }?.parameterTypes?.get(0)
+        }
+
+        private fun hookAddressConstructor(addressClass: Class<*>) {
+            tryHook("Address constructor") {
+                XposedBridge.hookAllConstructors(addressClass, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (okHostnameVerifierClass == null && param.args.size > 5) {
+                            param.args[5]?.let { verifier ->
+                                okHostnameVerifierClass = verifier.javaClass
+                                hookOkHostnameVerifierClass(verifier.javaClass)
+                            }
+                        }
+                    }
+                })
+            }
+        }
+
+        private fun hookOkHostnameVerifierClass(clazz: Class<*>) {
+            LogUtils.debug("✓ Found OkHostnameVerifier: ${clazz.name}")
+            tryHook("OkHostnameVerifier.verify") {
+                XposedBridge.hookAllMethods(clazz, "verify", object : XC_MethodReplacement() {
+                    override fun replaceHookedMethod(param: MethodHookParam) = true
+                })
+            }
+        }
+
+        private fun hookCertificatePinnerClass(clazz: Class<*>) {
+            LogUtils.debug("✓ Found CertificatePinner: ${clazz.name}")
+            tryHook("CertificatePinner.check") {
+                clazz.declaredMethods.filter { method ->
+                    method.returnType.name == "void" &&
+                            method.parameterTypes.size == 2 &&
+                            method.parameterTypes[0].name == "java.lang.String" &&
+                            method.parameterTypes[1].name == "java.util.List"
+                }.forEach { method ->
+                    XposedBridge.hookMethod(method, object : XC_MethodReplacement() {
+                        override fun replaceHookedMethod(param: MethodHookParam) = null
+                    })
+                }
             }
         }
 
