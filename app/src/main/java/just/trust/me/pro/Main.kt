@@ -2,6 +2,7 @@ package just.trust.me.pro
 
 import android.annotation.SuppressLint
 import android.net.http.SslError
+import android.util.Log
 import android.webkit.SslErrorHandler
 import android.webkit.WebView
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -12,7 +13,9 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import org.apache.http.impl.client.DefaultHttpClient
 import org.apache.http.params.HttpParams
+import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.lang.reflect.Proxy
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -26,18 +29,226 @@ class Main : IXposedHookLoadPackage {
 
         fun hookAll(lpparam: XC_LoadPackage.LoadPackageParam) {
             hookSSLContext(lpparam)
-            hookTrustManagerImplVerifyChain(lpparam)
+            hookConscryptSecurityProviders(lpparam)
             hookOkHttp(lpparam)
             hookWebView(lpparam)
             hookHttpClient(lpparam)
             hookXUtils(lpparam)
-            hookConscryptPlatform(lpparam)
             hookPinningTrustManager(lpparam)
             hookX509TrustManagerExtensions(lpparam)
             hookNetworkSecurityTrustManager(lpparam)
+            hookHttpsURLConnection(lpparam)
+            hookTrustManagerFactory(lpparam)
 
             // Auto detect and hook obfuscated OkHttp classes
             findAndHookObfuscatedOkHttp(lpparam)
+        }
+
+        private fun hookConscryptSecurityProviders(lpparam: XC_LoadPackage.LoadPackageParam) {
+            tryHook("TrustManagerImpl.checkServerTrusted(X509Certificate[], String)") {
+                XposedHelpers.findAndHookMethod(
+                    "com.android.org.conscrypt.TrustManagerImpl",
+                    lpparam.classLoader,
+                    "checkServerTrusted",
+                    Array<X509Certificate>::class.java,
+                    String::class.java,
+                    object : XC_MethodReplacement() {
+                        override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                            return ArrayList<X509Certificate>()
+                        }
+                    }
+                )
+            }
+
+            tryHook("TrustManagerImpl.checkServerTrusted(X509Certificate[], String, String)") {
+                XposedHelpers.findAndHookMethod(
+                    "com.android.org.conscrypt.TrustManagerImpl",
+                    lpparam.classLoader,
+                    "checkServerTrusted",
+                    Array<X509Certificate>::class.java,
+                    String::class.java,
+                    String::class.java,
+                    object : XC_MethodReplacement() {
+                        override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                            return ArrayList<X509Certificate>()
+                        }
+                    }
+                )
+            }
+
+            tryHook("TrustManagerImpl.checkServerTrusted(X509Certificate[], String, SSLSession)") {
+                XposedHelpers.findAndHookMethod(
+                    "com.android.org.conscrypt.TrustManagerImpl",
+                    lpparam.classLoader,
+                    "checkServerTrusted",
+                    Array<X509Certificate>::class.java,
+                    String::class.java,
+                    javax.net.ssl.SSLSession::class.java,
+                    object : XC_MethodReplacement() {
+                        override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                            return ArrayList<X509Certificate>()
+                        }
+                    }
+                )
+            }
+
+            val verifyChainSignatures = listOf(
+                arrayOf(
+                    Array<X509Certificate>::class.java,
+                    MutableList::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType,
+                    ByteArray::class.java,
+                    Any::class.java
+                ),
+                arrayOf(
+                    Array<X509Certificate>::class.java,
+                    java.util.List::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType,
+                    ByteArray::class.java,
+                    Any::class.java
+                ),
+                arrayOf(
+                    Array<X509Certificate>::class.java,
+                    java.util.List::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType
+                )
+            )
+
+            for (signature in verifyChainSignatures) {
+                tryHook("TrustManagerImpl.verifyChain (${signature.size} params)") {
+                    XposedHelpers.findAndHookMethod(
+                        "com.android.org.conscrypt.TrustManagerImpl",
+                        lpparam.classLoader,
+                        "verifyChain",
+                        *signature,
+                        object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                param.result = param.args[0]
+                            }
+                        }
+                    )
+                }
+            }
+
+            if (!isClassExists("com.android.org.conscrypt.Platform", lpparam)) {
+                LogUtils.debug("- Platform not found, skipping hooks")
+            } else {
+                val platformSignatures = listOf(
+                    arrayOf(
+                        javax.net.ssl.X509TrustManager::class.java,
+                        Array<X509Certificate>::class.java,
+                        String::class.java,
+                        "com.android.org.conscrypt.OpenSSLEngineImpl"
+                    ),
+                    arrayOf(
+                        javax.net.ssl.X509TrustManager::class.java,
+                        Array<X509Certificate>::class.java,
+                        String::class.java,
+                        "com.android.org.conscrypt.OpenSSLSocketImpl"
+                    ),
+                    arrayOf(
+                        javax.net.ssl.X509TrustManager::class.java,
+                        Array<X509Certificate>::class.java,
+                        String::class.java,
+                        "com.android.org.conscrypt.AbstractConscryptSocket"
+                    ),
+                    arrayOf(
+                        javax.net.ssl.X509TrustManager::class.java,
+                        Array<X509Certificate>::class.java,
+                        String::class.java,
+                        "com.android.org.conscrypt.ConscryptEngine"
+                    )
+                )
+
+                for (signature in platformSignatures) {
+                    tryHook("Platform.checkServerTrusted (${signature.last()})") {
+                        XposedHelpers.findAndHookMethod(
+                            "com.android.org.conscrypt.Platform",
+                            lpparam.classLoader,
+                            "checkServerTrusted",
+                            *signature,
+                            object : XC_MethodReplacement() {
+                                override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                                    return null
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        private fun hookHttpsURLConnection(lpparam: XC_LoadPackage.LoadPackageParam) {
+            tryHook("HttpsURLConnection.setDefaultHostnameVerifier") {
+                XposedHelpers.findAndHookMethod(
+                    "javax.net.ssl.HttpsURLConnection",
+                    lpparam.classLoader,
+                    "setDefaultHostnameVerifier",
+                    HostnameVerifier::class.java,
+                    XC_MethodReplacement.returnConstant(null)
+                )
+            }
+
+            tryHook("HttpsURLConnection.setSSLSocketFactory") {
+                XposedHelpers.findAndHookMethod(
+                    "javax.net.ssl.HttpsURLConnection",
+                    lpparam.classLoader,
+                    "setSSLSocketFactory",
+                    javax.net.ssl.SSLSocketFactory::class.java,
+                    XC_MethodReplacement.returnConstant(null)
+                )
+            }
+
+            tryHook("HttpsURLConnection.setHostnameVerifier") {
+                XposedHelpers.findAndHookMethod(
+                    "javax.net.ssl.HttpsURLConnection",
+                    lpparam.classLoader,
+                    "setHostnameVerifier",
+                    HostnameVerifier::class.java,
+                    XC_MethodReplacement.returnConstant(null)
+                )
+            }
+        }
+
+        private fun hookTrustManagerFactory(lpparam: XC_LoadPackage.LoadPackageParam) {
+            tryHook("TrustManagerFactory.getTrustManagers") {
+                XposedHelpers.findAndHookMethod(
+                    "javax.net.ssl.TrustManagerFactory",
+                    lpparam.classLoader,
+                    "getTrustManagers",
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            val result = param.result as? Array<*>
+                            result?.forEach { manager ->
+                                if (manager is javax.net.ssl.X509TrustManager) {
+                                    hookRootTrustManager(manager.javaClass)
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
+        private fun hookRootTrustManager(clazz: Class<*>) {
+            try {
+                val methodNames = listOf("checkServerTrusted", "checkClientTrusted")
+                methodNames.forEach { methodName ->
+                    val methods = clazz.declaredMethods.filter { it.name == methodName }
+                    for (method in methods) {
+                        XposedBridge.hookMethod(method, object : XC_MethodReplacement() {
+                            override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                                return null
+                            }
+                        })
+                    }
+                }
+            } catch (e: Throwable) {
+                LogUtils.hook("RootTrustManager", false, e)
+            }
         }
 
         private fun hookSSLContext(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -196,56 +407,6 @@ class Main : IXposedHookLoadPackage {
                         override fun replaceHookedMethod(param: MethodHookParam) = true
                     }
                 )
-            }
-        }
-
-        private fun hookConscryptPlatform(lpparam: XC_LoadPackage.LoadPackageParam) {
-            if (!isClassExists("com.android.org.conscrypt.Platform", lpparam)) {
-                LogUtils.debug("- Platform not found, skipping hooks")
-                return
-            }
-
-            val methodSignatures = listOf(
-                arrayOf(
-                    javax.net.ssl.X509TrustManager::class.java,
-                    Array<X509Certificate>::class.java,
-                    String::class.java,
-                    "com.android.org.conscrypt.OpenSSLEngineImpl"
-                ),
-                arrayOf(
-                    javax.net.ssl.X509TrustManager::class.java,
-                    Array<X509Certificate>::class.java,
-                    String::class.java,
-                    "com.android.org.conscrypt.OpenSSLSocketImpl"
-                ),
-                arrayOf(
-                    javax.net.ssl.X509TrustManager::class.java,
-                    Array<X509Certificate>::class.java,
-                    String::class.java,
-                    "com.android.org.conscrypt.AbstractConscryptSocket"
-                ),
-                arrayOf(
-                    javax.net.ssl.X509TrustManager::class.java,
-                    Array<X509Certificate>::class.java,
-                    String::class.java,
-                    "com.android.org.conscrypt.ConscryptEngine"
-                )
-            )
-
-            for (signature in methodSignatures) {
-                tryHook("Platform.checkServerTrusted") {
-                    XposedHelpers.findAndHookMethod(
-                        "com.android.org.conscrypt.Platform",
-                        lpparam.classLoader,
-                        "checkServerTrusted",
-                        *signature,
-                        object : XC_MethodReplacement() {
-                            override fun replaceHookedMethod(param: MethodHookParam): Any? {
-                                return null
-                            }
-                        }
-                    )
-                }
             }
         }
 
@@ -452,57 +613,6 @@ class Main : IXposedHookLoadPackage {
                     XposedBridge.hookMethod(method, object : XC_MethodReplacement() {
                         override fun replaceHookedMethod(param: MethodHookParam) = null
                     })
-                }
-            }
-        }
-
-        private fun hookTrustManagerImplVerifyChain(lpparam: XC_LoadPackage.LoadPackageParam) {
-            val methodSignatures = listOf(
-                arrayOf(
-                    Array<X509Certificate>::class.java,
-                    MutableList::class.java,
-                    String::class.java,
-                    Boolean::class.javaPrimitiveType,
-                    ByteArray::class.java,
-                    Any::class.java
-                ),
-                arrayOf(
-                    Array<X509Certificate>::class.java,
-                    java.util.List::class.java,
-                    String::class.java,
-                    Boolean::class.javaPrimitiveType,
-                    ByteArray::class.java,
-                    Any::class.java
-                ),
-                arrayOf(
-                    Array<X509Certificate>::class.java,
-                    java.util.List::class.java,
-                    String::class.java,
-                    Boolean::class.javaPrimitiveType
-                )
-            )
-
-            for (signature in methodSignatures) {
-                try {
-                    XposedHelpers.findAndHookMethod(
-                        "com.android.org.conscrypt.TrustManagerImpl",
-                        lpparam.classLoader,
-                        "verifyChain",
-                        *signature,
-                        object : XC_MethodHook() {
-                            override fun beforeHookedMethod(param: MethodHookParam) {
-                                param.result = param.args[0]
-                            }
-                        }
-                    )
-                    LogUtils.hook("TrustManagerImpl.verifyChain (${signature.size} params)", true)
-                    break
-                } catch (e: Throwable) {
-                    LogUtils.hook(
-                        "TrustManagerImpl.verifyChain (${signature.size} params)",
-                        false,
-                        e
-                    )
                 }
             }
         }
