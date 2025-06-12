@@ -14,6 +14,7 @@ class OkHttpHook : BaseHook() {
 
     override fun initHook(lpparam: LoadPackageParam) {
         hookOkHttp(lpparam)
+        hookSSLPeerUnverifiedException(lpparam)
         findAndHookObfuscatedOkHttp(lpparam)
     }
 
@@ -47,12 +48,60 @@ class OkHttpHook : BaseHook() {
                 }
             )
         }
+
+        // Hook OkHttp3 extended methods
+        tryHook("OkHttp3 CertificatePinner.findMatchingPins") {
+            XposedHelpers.findAndHookMethod(
+                "okhttp3.CertificatePinner",
+                lpparam.classLoader,
+                "findMatchingPins",
+                String::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        param.args[0] = ""
+                    }
+                }
+            )
+        }
+
+        tryHook("OkHttp3 CertificatePinner.check\$okhttp") {
+            XposedHelpers.findAndHookMethod(
+                "okhttp3.CertificatePinner",
+                lpparam.classLoader,
+                "check\$okhttp",
+                String::class.java,
+                kotlin.jvm.functions.Function0::class.java,
+                XC_MethodReplacement.DO_NOTHING
+            )
+        }
+    }
+
+    private fun hookSSLPeerUnverifiedException(lpparam: LoadPackageParam) {
+        tryHook("SSLPeerUnverifiedException constructor") {
+            XposedHelpers.findAndHookConstructor(
+                "javax.net.ssl.SSLPeerUnverifiedException",
+                lpparam.classLoader,
+                String::class.java,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val reason = param.args[0] as? String
+                        if (reason == "Certificate pinning failure!") {
+                            val trace = Thread.currentThread().stackTrace
+                            trace.forEach { element ->
+                                // Log stack trace for debugging certificate pinning
+                            }
+                        }
+                    }
+                }
+            )
+        }
     }
 
     @SuppressLint("PrivateApi")
     private fun findAndHookObfuscatedOkHttp(lpparam: LoadPackageParam) {
         tryHook("OpenSSLSocketFactoryImpl.createSocket") {
-            val openSslClass = lpparam.classLoader.loadClass("com.android.org.conscrypt.OpenSSLSocketFactoryImpl")
+            val openSslClass =
+                lpparam.classLoader.loadClass("com.android.org.conscrypt.OpenSSLSocketFactoryImpl")
             XposedBridge.hookAllMethods(
                 openSslClass,
                 "createSocket",
@@ -80,7 +129,10 @@ class OkHttpHook : BaseHook() {
         hookAddressConstructor(addressClass)
     }
 
-    private fun findRealConnectionClass(stackTrace: Array<StackTraceElement>, classLoader: ClassLoader): Class<*>? {
+    private fun findRealConnectionClass(
+        stackTrace: Array<StackTraceElement>,
+        classLoader: ClassLoader
+    ): Class<*>? {
         return stackTrace
             .map { it.className }
             .filter { !searchedClasses.containsKey(it) }

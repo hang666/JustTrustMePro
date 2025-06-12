@@ -11,7 +11,7 @@ class ConscryptHook : BaseHook() {
         if (!isClassExists("com.android.org.conscrypt.TrustManagerImpl", lpparam)) {
             return
         }
-        
+
         hookTrustManagerImpl(lpparam)
         hookPlatformChecks(lpparam)
     }
@@ -64,6 +64,47 @@ class ConscryptHook : BaseHook() {
                 }
             )
         }
+
+        // Hook additional checkTrusted methods
+        tryHook("TrustManagerImpl.checkTrusted(X509Certificate[], String, SSLSession, SSLParameters, boolean)") {
+            XposedHelpers.findAndHookMethod(
+                "com.android.org.conscrypt.TrustManagerImpl",
+                lpparam.classLoader,
+                "checkTrusted",
+                Array<X509Certificate>::class.java,
+                String::class.java,
+                javax.net.ssl.SSLSession::class.java,
+                javax.net.ssl.SSLParameters::class.java,
+                Boolean::class.javaPrimitiveType,
+                object : XC_MethodReplacement() {
+                    override fun replaceHookedMethod(param: MethodHookParam): Any {
+                        return ArrayList<X509Certificate>()
+                    }
+                }
+            )
+        }
+
+        tryHook("TrustManagerImpl.checkTrusted(X509Certificate[], ByteArray, ByteArray, String, String, boolean)") {
+            XposedHelpers.findAndHookMethod(
+                "com.android.org.conscrypt.TrustManagerImpl",
+                lpparam.classLoader,
+                "checkTrusted",
+                Array<X509Certificate>::class.java,
+                ByteArray::class.java,
+                ByteArray::class.java,
+                String::class.java,
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
+                object : XC_MethodReplacement() {
+                    override fun replaceHookedMethod(param: MethodHookParam): Any {
+                        return ArrayList<X509Certificate>()
+                    }
+                }
+            )
+        }
+
+        // Hook checkTrustedRecursive methods dynamically
+        hookCheckTrustedRecursive(lpparam)
 
         // Chain verification
         val verifyChainSignatures = listOf(
@@ -153,6 +194,27 @@ class ConscryptHook : BaseHook() {
                         }
                     }
                 )
+            }
+        }
+    }
+
+    private fun hookCheckTrustedRecursive(lpparam: LoadPackageParam) {
+        tryHook("TrustManagerImpl.checkTrustedRecursive (dynamic)") {
+            val clazz = lpparam.classLoader.loadClass("com.android.org.conscrypt.TrustManagerImpl")
+
+            clazz.declaredMethods.forEach { method ->
+                if (method.name == "checkTrustedRecursive" && method.returnType == List::class.java) {
+                    XposedHelpers.findAndHookMethod(
+                        clazz,
+                        method.name,
+                        *method.parameterTypes,
+                        object : XC_MethodReplacement() {
+                            override fun replaceHookedMethod(param: MethodHookParam): Any {
+                                return ArrayList<X509Certificate>()
+                            }
+                        }
+                    )
+                }
             }
         }
     }

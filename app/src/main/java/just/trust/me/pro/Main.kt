@@ -11,12 +11,15 @@ class Main : IXposedHookLoadPackage {
         ConscryptHook(),
         OkHttpHook(),
         WebViewHook(),
-        HttpClientHook()
+        HttpClientHook(),
+        NetworkSecurityHook(),
+        ThirdPartyHook(),
+        ProxyHook()
     )
 
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
         LogUtils.debug("Loading hooks for package: ${lpparam.packageName}")
-        
+
         hooks.forEach { hook ->
             try {
                 hook.initHook(lpparam)
@@ -24,7 +27,7 @@ class Main : IXposedHookLoadPackage {
                 LogUtils.debug("Failed to initialize ${hook.javaClass.simpleName}: ${e.message}")
             }
         }
-        
+
         LogUtils.debug("All hooks loaded for package: ${lpparam.packageName}")
     }
 }

@@ -1,6 +1,8 @@
 package just.trust.me.pro.util
 
 import android.annotation.SuppressLint
+import android.os.Build
+import androidx.annotation.RequiresApi
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
@@ -12,10 +14,12 @@ object SSLUtils {
     @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
     fun createTrustAll(): X509TrustManager = object : X509TrustManager {
         @SuppressLint("TrustAllX509TrustManager")
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
+        }
 
         @SuppressLint("TrustAllX509TrustManager")
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+        }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
     }
