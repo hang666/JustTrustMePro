@@ -175,6 +175,16 @@ class OkHttpHook : BaseHook() {
 
     private fun hookAddressConstructor(addressClass: Class<*>) {
         tryHook("Address constructor") {
+            if (certificatePinnerClass == null) {
+                try {
+                    certificatePinnerClass =
+                        addressClass.declaredFields.firstOrNull { it.name == "certificatePinner" }?.type
+                } catch (_: Throwable) {
+                }
+            }
+            if (certificatePinnerClass == null) {
+                return@tryHook
+            }
             XposedBridge.hookAllConstructors(
                 addressClass,
                 object : XC_MethodHook() {
@@ -184,10 +194,12 @@ class OkHttpHook : BaseHook() {
                         }
                         if (certificatePinnerIndex != -1) {
                             // Replace CertificatePinner with default instance
-                            param.args[certificatePinnerIndex] = XposedHelpers.callStaticMethod(
-                                certificatePinnerClass,
-                                "get"
-                            )
+                            try {
+                                param.args[certificatePinnerIndex] = XposedHelpers.callStaticMethod(
+                                    certificatePinnerClass, "get"
+                                )
+                            } catch (_: Throwable) {
+                            }
                         }
                     }
                 }
