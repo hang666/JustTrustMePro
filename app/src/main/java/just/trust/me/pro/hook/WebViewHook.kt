@@ -141,6 +141,10 @@ class WebViewHook : BaseHook() {
                 tryHook("SmartSslErrors.hookTargetClass: $targetClass") {
                     val clazz = Class.forName(targetClass, false, lpparam.classLoader)
 
+                    if (clazz.isInterface) {
+                        return@tryHook
+                    }
+
                     for (method in clazz.declaredMethods) {
                         if (method.name == "onReceivedSslError" && method.parameterTypes.size == 3) {
                             hookSslErrorMethodSmart(clazz.name, method, lpparam)
@@ -162,6 +166,10 @@ class WebViewHook : BaseHook() {
                     tryHook("SmartSslErrors.hookScannedClass: $className") {
                         val clazz = Class.forName(className, false, lpparam.classLoader)
 
+                        if (clazz.isInterface) {
+                            return@tryHook
+                        }
+
                         for (method in clazz.declaredMethods) {
                             if (method.name == "onReceivedSslError" && method.parameterTypes.size == 3) {
                                 hookSslErrorMethodSmart(clazz.name, method, lpparam)
@@ -178,6 +186,20 @@ class WebViewHook : BaseHook() {
         method: java.lang.reflect.Method,
         lpparam: LoadPackageParam
     ) {
+        if (java.lang.reflect.Modifier.isAbstract(method.modifiers)) {
+            return
+        }
+
+        val clazz = try {
+            Class.forName(className, false, lpparam.classLoader)
+        } catch (e: Throwable) {
+            return
+        }
+
+        if (clazz.isInterface) {
+            return
+        }
+
         val paramTypes = method.parameterTypes
 
         tryHook("SmartSslErrors.hookMethod: $className.onReceivedSslError") {

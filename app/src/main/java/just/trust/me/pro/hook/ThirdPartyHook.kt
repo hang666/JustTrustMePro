@@ -32,7 +32,8 @@ class ThirdPartyHook : BaseHook() {
                 String::class.java,
                 object : XC_MethodReplacement() {
                     override fun replaceHookedMethod(param: MethodHookParam): Any {
-                        return param.args[0] as Array<*>
+                        val certs = param.args[0] as Array<*>
+                        return certs.toList()
                     }
                 }
             )
