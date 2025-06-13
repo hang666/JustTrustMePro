@@ -138,7 +138,7 @@ class WebViewHook : BaseHook() {
         // Hook target classes from smart SSL hook targets
         for (targetClass in targets) {
             if (isClassExists(targetClass, lpparam)) {
-                tryHook("SmartSslErrors.hookTargetClass: $targetClass") {
+                tryHook("SmartSslErrors.hookTargetClass: $targetClass", false) {
                     val clazz = Class.forName(targetClass, false, lpparam.classLoader)
 
                     if (clazz.isInterface) {
@@ -163,7 +163,7 @@ class WebViewHook : BaseHook() {
                     className.contains("ssl", ignoreCase = true) ||
                     className.contains("web", ignoreCase = true)
                 ) {
-                    tryHook("SmartSslErrors.hookScannedClass: $className") {
+                    tryHook("SmartSslErrors.hookScannedClass: $className", false) {
                         val clazz = Class.forName(className, false, lpparam.classLoader)
 
                         if (clazz.isInterface) {
@@ -202,7 +202,7 @@ class WebViewHook : BaseHook() {
 
         val paramTypes = method.parameterTypes
 
-        tryHook("SmartSslErrors.hookMethod: $className.onReceivedSslError") {
+        tryHook("SmartSslErrors.hookMethod: $className.onReceivedSslError", false) {
             XposedHelpers.findAndHookMethod(
                 className,
                 lpparam.classLoader,

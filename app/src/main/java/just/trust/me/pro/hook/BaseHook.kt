@@ -13,6 +13,17 @@ abstract class BaseHook {
         }
     }
 
+    protected fun tryHook(hookName: String, showSuccess: Boolean = true, block: () -> Unit) {
+        try {
+            block()
+            if (showSuccess) {
+                LogUtils.hook(hookName, true)
+            }
+        } catch (e: Throwable) {
+            LogUtils.hook(hookName, false, e)
+        }
+    }
+
     protected fun isClassExists(className: String, lpparam: LoadPackageParam): Boolean {
         return try {
             lpparam.classLoader.loadClass(className)
