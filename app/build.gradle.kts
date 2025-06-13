@@ -11,8 +11,8 @@ android {
         applicationId = "just.trust.me.pro"
         minSdk = 21
         targetSdk = 34
-        versionCode = 10003
-        versionName = "1.0.3"
+        versionCode = 10005
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
