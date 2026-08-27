@@ -5,7 +5,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XC_MethodHook
 import just.trust.me.pro.util.SSLUtils
-import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
@@ -22,22 +21,19 @@ class ThirdPartyHook : BaseHook() {
             return
         }
 
-        tryHook("X509TrustManagerExtensions.checkServerTrusted") {
-            XposedHelpers.findAndHookMethod(
-                "android.net.http.X509TrustManagerExtensions",
-                lpparam.classLoader,
-                "checkServerTrusted",
-                Array<X509Certificate>::class.java,
-                String::class.java,
-                String::class.java,
-                object : XC_MethodReplacement() {
-                    override fun replaceHookedMethod(param: MethodHookParam): Any {
-                        val certs = param.args[0] as Array<*>
-                        return certs.toList()
-                    }
+        val clazz = lpparam.classLoader.loadClass("android.net.http.X509TrustManagerExtensions")
+        clazz.declaredMethods
+            .filter { it.name == "checkServerTrusted" && !it.isSynthetic }
+            .forEach { method ->
+                tryHook("X509TrustManagerExtensions.checkServerTrusted(${method.parameterTypes.size})") {
+                    XposedHelpers.findAndHookMethod(
+                        clazz,
+                        method.name,
+                        *method.parameterTypes,
+                        trustBypassReplacement()
+                    )
                 }
-            )
-        }
+            }
     }
 
     private fun hookXUtils(lpparam: LoadPackageParam) {

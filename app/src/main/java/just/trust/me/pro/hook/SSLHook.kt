@@ -96,22 +96,21 @@ class SSLHook : BaseHook() {
 
     private fun hookRootTrustManager(clazz: Class<*>) {
         try {
-            val methodNames = listOf("checkServerTrusted", "checkClientTrusted")
-            methodNames.forEach { methodName ->
-                clazz.declaredMethods
-                    .filter { it.name == methodName }
-                    .forEach { method ->
+            val methodNames = setOf("checkServerTrusted", "checkClientTrusted")
+            clazz.declaredMethods
+                .filter { it.name in methodNames && !it.isSynthetic }
+                .forEach { method ->
+                    try {
                         XposedHelpers.findAndHookMethod(
                             clazz,
-                            methodName,
-                            Array<java.security.cert.X509Certificate>::class.java,
-                            String::class.java,
-                            returnConstant(null)
+                            method.name,
+                            *method.parameterTypes,
+                            trustBypassReplacement()
                         )
+                    } catch (_: Throwable) {
                     }
-            }
-        } catch (e: Throwable) {
-            // Ignore hook failures for individual trust managers
+                }
+        } catch (_: Throwable) {
         }
     }
 

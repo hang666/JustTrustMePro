@@ -11,6 +11,37 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 
 object SSLUtils {
+    fun certsToList(certsArg: Any?): java.util.ArrayList<X509Certificate> {
+        return when (certsArg) {
+            is Array<*> -> java.util.ArrayList(certsArg.filterIsInstance<X509Certificate>())
+            is Collection<*> -> java.util.ArrayList(certsArg.filterIsInstance<X509Certificate>())
+            else -> java.util.ArrayList()
+        }
+    }
+
+    // WebView expects List, not X509Certificate[]. Empty chain is a hard failure on new Chromium.
+    fun bypassTrustCheckResult(returnType: Class<*>, certsArg: Any?): Any? {
+        if (returnType == Void.TYPE) {
+            return null
+        }
+        val certs = certsToList(certsArg)
+        if (MutableList::class.java.isAssignableFrom(returnType) ||
+            List::class.java.isAssignableFrom(returnType)
+        ) {
+            return certs
+        }
+        if (returnType.isArray) {
+            val component = returnType.componentType
+            if (component == X509Certificate::class.java ||
+                component == java.security.cert.Certificate::class.java ||
+                component == Any::class.java
+            ) {
+                return certs.toTypedArray()
+            }
+        }
+        return null
+    }
+
     @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
     fun createTrustAll(): X509TrustManager = object : X509TrustManager {
         @SuppressLint("TrustAllX509TrustManager")
@@ -22,6 +53,20 @@ object SSLUtils {
         }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+
+        @Suppress("unused", "UNUSED_PARAMETER")
+        fun checkServerTrusted(
+            chain: Array<X509Certificate>,
+            authType: String,
+            host: String
+        ): MutableList<X509Certificate> = certsToList(chain)
+
+        @Suppress("unused", "UNUSED_PARAMETER")
+        fun checkClientTrusted(
+            chain: Array<X509Certificate>,
+            authType: String,
+            host: String
+        ): MutableList<X509Certificate> = certsToList(chain)
     }
 
     fun createTrustAllHostnameVerifier(): HostnameVerifier {

@@ -61,11 +61,7 @@ class NetworkSecurityHook : BaseHook() {
                 Array<X509Certificate>::class.java,
                 String::class.java,
                 String::class.java,
-                object : XC_MethodReplacement() {
-                    override fun replaceHookedMethod(param: MethodHookParam): Any {
-                        return ArrayList<X509Certificate>()
-                    }
-                }
+                trustBypassReplacement()
             )
         }
 
